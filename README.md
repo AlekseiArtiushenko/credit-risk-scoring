@@ -35,6 +35,17 @@ out-of-fold predictions, so no row is ever scored by a model that trained on it.
 The spread across folds is reported next to the mean, because a mean without a
 spread cannot be trusted.
 
+## Data policy
+
+This repository contains code only. The competition data is never committed,
+never mirrored and never redistributed here, in whole or in sample. Home Credit
+grants access to it for competition use, and the rules forbid passing it on to
+anyone who has not accepted them. Clone this repo and fetch the data yourself
+from Kaggle under your own account.
+
+Derived artefacts in `reports/` are aggregate numbers only: metrics, fold
+scores and feature importances. No row-level data leaves the machine.
+
 ## Getting the data
 
 The competition data needs a Kaggle account and an accepted set of competition
