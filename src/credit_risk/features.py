@@ -1,68 +1,88 @@
-"""Feature preparation for the application table.
+"""Подготовка признаков.
 
-Deliberately small. The point of a baseline is to be honest about what the raw
-columns are worth before any clever engineering is layered on top.
+Осознанно небольшой модуль. Смысл бейзлайна в том, чтобы честно измерить, чего
+стоят сырые колонки, до того как сверху наворачивается что-то умное.
 """
 
 from __future__ import annotations
 
-import numpy as np
-import pandas as pd
+import polars as pl
 
-from .data import DAYS_EMPLOYED_SENTINEL
+from .config import DATE_COLUMN, ID_COLUMN, TARGET, WEEK_COLUMN
+
+SERVICE_COLUMNS = (ID_COLUMN, TARGET, WEEK_COLUMN, DATE_COLUMN, "MONTH")
+
+# Колонка, у которой почти все значения пустые или одно и то же, не несёт
+# информации, но занимает память и замедляет обучение.
+MAX_NULL_SHARE = 0.95
+MIN_UNIQUE_VALUES = 2
+MAX_CATEGORY_LEVELS = 200
 
 
-def _safe_ratio(numerator: pd.Series, denominator: pd.Series) -> pd.Series:
-    """Divide, turning division by zero into a null rather than an infinity."""
-    return numerator / denominator.replace(0, np.nan)
+def dates_to_offsets(df: pl.DataFrame) -> pl.DataFrame:
+    """Заменить даты на число дней до даты решения по заявке.
 
-
-def add_domain_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Add the handful of ratios a credit analyst would compute by hand.
-
-    Affordability is a ratio question, not a level question: an annuity of
-    twelve thousand means nothing until you divide it by income.
+    Абсолютная дата это ловушка: модель выучит конкретный календарный период и
+    развалится на следующем. Относительный срок переносится во времени.
     """
-    df = df.copy()
+    date_columns = [
+        name
+        for name, dtype in zip(df.columns, df.dtypes)
+        if dtype == pl.Date and name != DATE_COLUMN
+    ]
+    if not date_columns:
+        return df
 
-    if "DAYS_EMPLOYED" in df:
-        df["DAYS_EMPLOYED"] = df["DAYS_EMPLOYED"].replace(DAYS_EMPLOYED_SENTINEL, np.nan)
-
-    if {"AMT_CREDIT", "AMT_INCOME_TOTAL"} <= set(df):
-        df["CREDIT_INCOME_RATIO"] = _safe_ratio(df["AMT_CREDIT"], df["AMT_INCOME_TOTAL"])
-
-    if {"AMT_ANNUITY", "AMT_INCOME_TOTAL"} <= set(df):
-        df["ANNUITY_INCOME_RATIO"] = _safe_ratio(df["AMT_ANNUITY"], df["AMT_INCOME_TOTAL"])
-
-    if {"AMT_ANNUITY", "AMT_CREDIT"} <= set(df):
-        # Inverse of the loan term in years: how fast the loan is repaid.
-        df["CREDIT_TERM"] = _safe_ratio(df["AMT_ANNUITY"], df["AMT_CREDIT"])
-
-    if {"AMT_GOODS_PRICE", "AMT_CREDIT"} <= set(df):
-        # Above one means borrowing more than the asset is worth.
-        df["CREDIT_GOODS_RATIO"] = _safe_ratio(df["AMT_CREDIT"], df["AMT_GOODS_PRICE"])
-
-    if {"DAYS_EMPLOYED", "DAYS_BIRTH"} <= set(df):
-        df["EMPLOYED_LIFE_RATIO"] = _safe_ratio(df["DAYS_EMPLOYED"], df["DAYS_BIRTH"])
-
-    if "DAYS_BIRTH" in df:
-        df["AGE_YEARS"] = -df["DAYS_BIRTH"] / 365.25
-
-    return df
+    return df.with_columns(
+        [
+            (pl.col(DATE_COLUMN) - pl.col(name)).dt.total_days().cast(pl.Float32).alias(name)
+            for name in date_columns
+        ]
+    )
 
 
-def encode_categoricals(df: pd.DataFrame) -> pd.DataFrame:
-    """Cast object columns to pandas category dtype.
+def drop_useless_columns(df: pl.DataFrame) -> pl.DataFrame:
+    """Выбросить пустые, постоянные и слишком дробные категориальные колонки."""
+    n_rows = df.height
+    keep = []
 
-    LightGBM consumes that directly, so we avoid one-hot encoding and the
-    dimensional blow-up that comes with it.
+    for name, dtype in zip(df.columns, df.dtypes):
+        if name in SERVICE_COLUMNS:
+            keep.append(name)
+            continue
+
+        column = df[name]
+        if column.null_count() / n_rows > MAX_NULL_SHARE:
+            continue
+        n_unique = column.n_unique()
+        if n_unique < MIN_UNIQUE_VALUES:
+            continue
+        if dtype == pl.String and n_unique > MAX_CATEGORY_LEVELS:
+            continue
+
+        keep.append(name)
+
+    return df.select(keep)
+
+
+def build_features(df: pl.DataFrame) -> pl.DataFrame:
+    """Полное преобразование: сырая таблица на входе, матрица для модели на выходе."""
+    return drop_useless_columns(dates_to_offsets(df))
+
+
+def to_model_frame(df: pl.DataFrame):
+    """Перевести в pandas и отделить метку, неделю и идентификатор от признаков.
+
+    LightGBM понимает категориальный тип pandas напрямую, поэтому обходимся без
+    one-hot и не раздуваем размерность.
     """
-    df = df.copy()
-    for column in df.select_dtypes(include=["object"]).columns:
-        df[column] = df[column].astype("category")
-    return df
+    pdf = df.to_pandas()
 
+    y = pdf[TARGET].astype("int8")
+    weeks = pdf[WEEK_COLUMN].to_numpy()
+    x = pdf.drop(columns=[c for c in SERVICE_COLUMNS if c in pdf.columns])
 
-def build_features(df: pd.DataFrame) -> pd.DataFrame:
-    """The full baseline transform, raw table in, model matrix out."""
-    return encode_categoricals(add_domain_features(df))
+    for name in x.select_dtypes(include=["object"]).columns:
+        x[name] = x[name].astype("category")
+
+    return x, y, weeks

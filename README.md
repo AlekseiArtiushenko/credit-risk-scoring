@@ -1,102 +1,133 @@
-# Credit Default Risk
+# Кредитный скоринг: устойчивость модели во времени
 
-A reproducible baseline for predicting loan default from a single application
-form, built on the [Home Credit Default Risk](https://www.kaggle.com/competitions/home-credit-default-risk)
-dataset.
+Решение соревнования [Home Credit - Credit Risk Model Stability](https://www.kaggle.com/competitions/home-credit-credit-risk-model-stability):
+предсказать дефолт по заявке так, чтобы качество не падало со временем.
 
-The goal is not a leaderboard position. It is a pipeline that an underwriting
-team could argue with: honest validation, metrics that map to a lending
-decision, and an explicit account of where the model fails.
+Цель проекта не место в таблице лидеров. Цель это пайплайн, с которым можно
+спорить: честная проверка, метрики, понятные кредитному аналитику, и явный
+разбор того, где модель ломается.
 
-## The problem
+## Задача
 
-A lender sees an application and must decide whether the applicant will default.
-Roughly eight percent of applicants do, so a model that predicts "no default"
-for everyone is right 92 percent of the time and completely useless. Accuracy is
-the wrong instrument.
+Кредитор видит заявку и должен решить, вернёт ли заёмщик деньги. Дефолтов
+около трёх процентов, поэтому модель, которая всем говорит «вернёт», права в 97
+процентах случаев и при этом совершенно бесполезна. Accuracy тут не инструмент.
 
-## Metrics and why
+Отдельная сложность в том, что модель стареет. Меняется состав заявителей,
+экономика, продуктовая линейка. Модель, обученная на прошлом годе, через
+полгода работает хуже, и соревнование измеряет именно это.
 
-| Metric | What it answers |
+## Метрика
+
+Основная метрика это устойчивость джини. Джини считается отдельно внутри каждой
+недели, через полученные значения проводится прямая, и дальше:
+
+```
+устойчивость = среднее(джини) + 88.0 * min(0, наклон) - 0.5 * std(остатков)
+```
+
+Множитель 88 при отрицательном наклоне означает, что падение качества во
+времени дороже, чем само качество. Модель, которая блестит сегодня и
+посредственна через три месяца, проигрывает ровной и более слабой.
+
+Рядом считаются метрики, которые объясняют, почему оценка сдвинулась:
+
+| Метрика | На какой вопрос отвечает |
 | --- | --- |
-| ROC AUC | Does the model rank a random defaulter above a random non-defaulter? |
-| PR AUC | How much of the precision survives at the low base rate? |
-| Gini | The same ranking quality, in the units a risk team already uses |
-| KS | Where does the score separate good from bad most sharply? |
-| Top-decile default rate | If we decline the riskiest ten percent, what do we actually avoid? |
+| ROC AUC | Ставит ли модель случайного дефолтника выше случайного платящего? |
+| PR AUC | Сколько точности выживает при доле дефолтов в три процента? |
+| Джини | То же качество ранжирования в привычных банку единицах |
+| KS | Где скор сильнее всего разделяет хороших и плохих |
+| Доля дефолтов в худшем дециле | Если отказать десяти процентам худших, чего мы избежим |
 
-The last row is the one a business reads. The rest are there to keep the first
-one honest.
+## Проверка модели
 
-## Validation
+Разбиение по времени с расширяющимся окном. Первый фолд учится на первой
+половине недель и проверяется на следующем куске, дальше обучающая часть
+растёт, а проверочная едет вперёд. Ни одна строка из будущего не попадает в
+обучение.
 
-Five-fold stratified cross-validation. Every reported number comes from
-out-of-fold predictions, so no row is ever scored by a model that trained on it.
-The spread across folds is reported next to the mean, because a mean without a
-spread cannot be trusted.
+Для сравнения в коде оставлена и случайная стратифицированная нарезка. Она
+перемешивает недели, то есть разрешает модели подглядеть в будущее, и потому
+систематически завышает качество. Разница между двумя числами и есть цена
+неправильной валидации, флаг `--compare-random` её показывает.
 
-## Data policy
+## Данные
 
-This repository contains code only. The competition data is never committed,
-never mirrored and never redistributed here, in whole or in sample. Home Credit
-grants access to it for competition use, and the rules forbid passing it on to
-anyone who has not accepted them. Clone this repo and fetch the data yourself
-from Kaggle under your own account.
+В соревновании около двадцати связанных таблиц и полтора миллиона заявок за
+период с января 2019 по октябрь 2020.
 
-Derived artefacts in `reports/` are aggregate numbers only: metrics, fold
-scores and feature importances. No row-level data leaves the machine.
+| Таблица | Глубина | Строк | Колонок |
+| --- | --- | --- | --- |
+| base | опорная | 1 526 659 | 5 |
+| static | 0 | 1 526 659 | 168 |
+| static_cb | 0 | 1 500 476 | 53 |
+| applprev | 1 | 6 525 979 | 41 |
+| credit_bureau_a | 1 | 15 940 537 | 79 |
+| person | 1 | 2 973 991 | 37 |
+| credit_bureau_a | 2 | 188 298 452 | 19 |
 
-## Getting the data
+Глубина ноль означает одну строку на заявку, такие таблицы приклеиваются
+напрямую. Глубина один и два дают много строк на заявку и требуют агрегации.
 
-The competition data needs a Kaggle account and an accepted set of competition
-rules, so it is not committed here and cannot be downloaded unattended.
+Последняя буква в имени колонки кодирует тип: `A` это сумма, `D` это дата, `P`
+это дни просрочки, `M` это замаскированная категория, `L` это всё остальное.
+Описания 465 колонок лежат в `feature_definitions.csv` рядом с данными.
+
+## Политика в отношении данных
+
+В репозитории только код. Данные соревнования не выкладываются сюда никогда, ни
+целиком, ни выборкой. Home Credit даёт к ним доступ для участия в соревновании,
+и правила запрещают передавать их тем, кто эти правила не принимал. Скачай их
+сам под своим аккаунтом.
+
+В `reports/` попадают только агрегаты: метрики, результаты по фолдам, вклад
+признаков. Ни одной исходной строки с машины не уходит.
+
+## Как получить данные
 
 ```bash
 pip install kaggle
-kaggle competitions download -c home-credit-default-risk -p data/raw
-unzip data/raw/home-credit-default-risk.zip -d data/raw
+kaggle competitions download -c home-credit-credit-risk-model-stability -p data/raw
 ```
 
-To run the pipeline without any of that, generate a synthetic stand-in with the
-same schema, the same sentinel values and the same missingness:
+Распаковать нужно только папку `parquet_files`. Те же данные в CSV занимают 25
+гигабайт против 1.3 в parquet.
+
+## Как запустить
 
 ```bash
-python scripts/make_synthetic.py --rows 20000
+pip install -r requirements.txt
+pip install -e .
+python -m credit_risk.cli --sample 300000 --compare-random
 ```
 
-It is a smoke-test fixture. Scores from it mean nothing about credit risk.
+Без `--sample` считается на всех полутора миллионах заявок. Результаты
+печатаются и складываются в `reports/<tag>.json`.
 
-## Running
+Посмотреть на любую таблицу, не открывая её в редакторе:
 
 ```bash
-python -m credit_risk.cli --folds 5 --tag baseline
+python scripts/peek.py train_static_0_0 --columns 15 --describe
 ```
 
-Results are printed and written to `reports/<tag>.json`.
-
-## Layout
+## Структура
 
 ```
 src/credit_risk/
-  config.py      paths, seed, CV settings
-  data.py        loading the application table
-  features.py    domain ratios and categorical handling
-  model.py       LightGBM parameters
-  validation.py  out-of-fold cross-validation
-  metrics.py     the scoring panel
-  cli.py         entry point
-scripts/         synthetic data generator
-tests/           smoke tests for the pipeline
+  config.py      пути, зерно случайности, настройки разбиения
+  console.py     вывод UTF-8 в консоль Windows
+  data.py        чтение parquet и типы колонок по суффиксам
+  features.py    даты в сроки, отбор колонок, подготовка матрицы
+  model.py       параметры LightGBM
+  validation.py  разбиение по времени и случайное, для сравнения
+  metrics.py     метрики, включая устойчивость
+  cli.py         точка входа
+scripts/peek.py  просмотр parquet-таблиц
+tests/           проверки метрики и разбиения
 ```
 
-## Notes on the data
+## Состояние
 
-`DAYS_EMPLOYED` carries `365243` for applicants who have never been employed.
-Left alone, the model happily learns a thousand-year employment history as a
-feature. It is replaced with a null in `features.py`. This kind of sentinel is
-the most common way a tabular baseline quietly goes wrong.
-
-## Status
-
-Baseline running on synthetic data. Real-data results, error analysis and the
-related tables (bureau, previous applications) are next.
+Бейзлайн считается на таблицах нулевой глубины. Дальше по плану агрегаты по
+связанным таблицам, разбор ошибок по неделям и сравнение с CatBoost.

@@ -1,4 +1,4 @@
-"""The gradient boosting model and its hyper-parameters."""
+"""Модель градиентного бустинга и её гиперпараметры."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ import lightgbm as lgb
 
 from .config import SEED
 
-# Conservative starting point. Slow learning rate plus early stopping is a
-# better default than a tuned-looking set of numbers nobody can justify.
+# Осторожная отправная точка. Медленная скорость обучения плюс ранняя остановка
+# лучше, чем подогнанный набор чисел, который никто не может обосновать.
 BASELINE_PARAMS: dict = {
     "objective": "binary",
     "metric": "auc",
@@ -37,7 +37,7 @@ def train_fold(
     y_valid,
     params: dict | None = None,
 ) -> lgb.Booster:
-    """Fit one fold with early stopping on its own validation slice."""
+    """Обучить одну модель с ранней остановкой по своей проверочной части."""
     params = {**BASELINE_PARAMS, **(params or {})}
 
     train_set = lgb.Dataset(x_train, label=y_train)

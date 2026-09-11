@@ -1,3 +1,3 @@
-"""Credit default risk: a reproducible tabular ML baseline."""
+"""Кредитный скоринг: воспроизводимый бейзлайн на табличных данных."""
 
 __version__ = "0.1.0"
