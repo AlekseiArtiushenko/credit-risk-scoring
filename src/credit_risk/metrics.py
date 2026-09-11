@@ -55,19 +55,24 @@ def score_panel(y_true: np.ndarray, y_score: np.ndarray) -> dict[str, float]:
 
 
 def gini_per_week(
-    week: np.ndarray, y_true: np.ndarray, y_score: np.ndarray
+    week: np.ndarray, y_true: np.ndarray, y_score: np.ndarray, min_count: int = 0
 ) -> tuple[np.ndarray, np.ndarray]:
     """Джини, посчитанный отдельно внутри каждой недели.
 
     Недели, где у всех заявок одинаковая метка, не несут информации о
     ранжировании, поэтому выбрасываются, а не засчитываются как ноль.
+
+    ``min_count`` дополнительно выбрасывает недели, где заявок слишком мало.
+    Соревнование так не делает, там считаются все недели подряд. Нам это нужно
+    только для анализа: в неделях ковидной паузы на 825 заявок приходится два
+    десятка дефолтов, и джини по ним показывает шум, а не качество модели.
     """
     frame = pd.DataFrame({"week": week, "y": y_true, "score": y_score})
 
     weeks: list[int] = []
     ginis: list[float] = []
     for value, group in frame.sort_values("week").groupby("week", sort=True):
-        if group["y"].nunique() < 2:
+        if group["y"].nunique() < 2 or len(group) < min_count:
             continue
         weeks.append(value)
         ginis.append(2.0 * roc_auc_score(group["y"], group["score"]) - 1.0)
@@ -112,6 +117,7 @@ def stability_components(
     y_score: np.ndarray,
     falling_rate_weight: float = 88.0,
     residual_std_weight: float = 0.5,
+    min_count: int = 0,
 ) -> dict:
     """Разложить метрику устойчивости на составляющие.
 
@@ -119,7 +125,7 @@ def stability_components(
     равномерно, рухнуло ли в конце, или просто шумит от недели к неделе, видно
     только по наклону, разбросу и самому ряду недельных значений.
     """
-    weeks, ginis = gini_per_week(week, y_true, y_score)
+    weeks, ginis = gini_per_week(week, y_true, y_score, min_count)
     if len(ginis) < 2:
         raise ValueError("нужно минимум две недели с обеими метками")
 

@@ -168,3 +168,26 @@ def run_random_cv(
         n_splits=config.n_splits, shuffle=config.shuffle, random_state=config.seed
     )
     return _run(x, y, weeks, list(splitter.split(x, y)))
+
+
+def holdout_split(weeks: np.ndarray, holdout_from: int) -> list[tuple[np.ndarray, np.ndarray]]:
+    """Одна отсечка по времени: всё до недели N в обучение, всё с неё в проверку.
+
+    В отличие от фолдов, проверочная часть здесь одна и она большая. Это ближе
+    всего к тому, как модель живёт в проде: обучили один раз на накопленном
+    прошлом и дальше месяцами применяем к новым заявкам, не переобучая.
+    """
+    train_mask = weeks < holdout_from
+    valid_mask = weeks >= holdout_from
+
+    if train_mask.sum() == 0 or valid_mask.sum() == 0:
+        raise ValueError(f"отсечка на неделе {holdout_from} оставляет одну из частей пустой")
+
+    return [(np.flatnonzero(train_mask), np.flatnonzero(valid_mask))]
+
+
+def run_holdout(
+    x: pd.DataFrame, y: pd.Series, weeks: np.ndarray, holdout_from: int
+) -> CVResult:
+    """Обучить одну модель на прошлом и проверить её на всём будущем сразу."""
+    return _run(x, y, weeks, holdout_split(weeks, holdout_from))
