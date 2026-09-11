@@ -46,3 +46,45 @@ def test_cv_beats_random(frame):
     assert len(result.oof_predictions) == len(frame)
     assert result.mean_auc > 0.6, "the planted signal should be findable"
     assert result.std_auc < 0.1, "folds should broadly agree"
+
+
+def _ranked_scores(y: np.ndarray, strength: float, rng: np.random.Generator) -> np.ndarray:
+    """Scores that separate the classes by `strength`. Zero means random."""
+    return y * strength + rng.normal(0, 1, size=len(y))
+
+
+def test_stability_of_a_steady_model_is_its_mean_gini():
+    from credit_risk.metrics import gini_per_week, gini_stability
+
+    # Weekly samples are deliberately large. With few rows per week the weekly
+    # gini is noisy, noise alone produces a slightly negative slope, and the
+    # factor of 88 turns that noise into a real penalty. That sensitivity is
+    # the whole point of the metric, not a flaw in the test.
+    rng = np.random.default_rng(7)
+    weeks = np.repeat(np.arange(20), 3000)
+    y = rng.binomial(1, 0.1, size=len(weeks))
+    scores = _ranked_scores(y, strength=1.0, rng=rng)
+
+    _, ginis = gini_per_week(weeks, y, scores)
+    stability = gini_stability(weeks, y, scores)
+
+    # No trend, so only the small week-to-week scatter is deducted.
+    assert stability == pytest.approx(ginis.mean(), abs=0.05)
+
+
+def test_a_decaying_model_is_punished():
+    from credit_risk.metrics import gini_per_week, gini_stability
+
+    rng = np.random.default_rng(7)
+    weeks = np.repeat(np.arange(20), 400)
+    y = rng.binomial(1, 0.1, size=len(weeks))
+
+    # Separation fades from strong to none as the weeks go by.
+    strength = np.linspace(1.6, 0.0, 20)[weeks]
+    scores = y * strength + rng.normal(0, 1, size=len(weeks))
+
+    _, ginis = gini_per_week(weeks, y, scores)
+    stability = gini_stability(weeks, y, scores)
+
+    assert stability < 0, "a model that decays should score below zero"
+    assert stability < ginis.mean() - 1.0, "the slope penalty must dominate"
