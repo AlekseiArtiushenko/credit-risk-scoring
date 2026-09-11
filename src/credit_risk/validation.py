@@ -191,3 +191,14 @@ def run_holdout(
 ) -> CVResult:
     """Обучить одну модель на прошлом и проверить её на всём будущем сразу."""
     return _run(x, y, weeks, holdout_split(weeks, holdout_from))
+
+
+def run_splits(
+    x: pd.DataFrame, y: pd.Series, weeks: np.ndarray, splits: list[tuple[np.ndarray, np.ndarray]]
+) -> CVResult:
+    """Прогнать произвольное разбиение, заданное снаружи.
+
+    Нужна для экспериментов, где обучающее и проверочное окна выбираются вручную,
+    например чтобы сравнить разные эпохи обучения на одной проверочной выборке.
+    """
+    return _run(x, y, weeks, splits)
