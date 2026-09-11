@@ -53,3 +53,58 @@ def train_fold(
             lgb.log_evaluation(period=0),
         ],
     )
+
+
+# ---------------------------------------------------------------------------
+# CatBoost
+# ---------------------------------------------------------------------------
+
+# Нужен не ради прироста от смены алгоритма, а ради ансамбля: две модели с
+# разным устройством ошибаются на разных заявителях, и усреднение гасит ту часть
+# ошибки, которая у них не совпадает.
+CATBOOST_PARAMS: dict = {
+    "loss_function": "Logloss",
+    "eval_metric": "AUC",
+    "learning_rate": 0.06,
+    "depth": 6,
+    "l2_leaf_reg": 3.0,
+    "random_seed": SEED,
+    "allow_writing_files": False,
+    "verbose": False,
+}
+
+CATBOOST_ITERATIONS = 1500
+CATBOOST_EARLY_STOPPING = 100
+
+# CatBoost не принимает пропуски в категориальных колонках: для него категория
+# это строка, а пропуск строкой не является. Заменяем явной меткой, чтобы
+# «неизвестно» осталось отдельным значением, а не смешалось с чем-то ещё.
+MISSING_CATEGORY = "__нет значения__"
+
+
+def prepare_for_catboost(x):
+    """Привести категориальные колонки к виду, который понимает CatBoost."""
+    x = x.copy()
+    categorical = [c for c in x.columns if str(x[c].dtype) == "category"]
+
+    for name in categorical:
+        x[name] = x[name].astype("object").fillna(MISSING_CATEGORY).astype(str)
+
+    return x, categorical
+
+
+def train_fold_catboost(x_train, y_train, x_valid, y_valid, params: dict | None = None):
+    """Обучить одну модель CatBoost с ранней остановкой."""
+    from catboost import CatBoostClassifier, Pool
+
+    params = {**CATBOOST_PARAMS, **(params or {})}
+
+    x_train, categorical = prepare_for_catboost(x_train)
+    x_valid, _ = prepare_for_catboost(x_valid)
+
+    train_pool = Pool(x_train, y_train, cat_features=categorical)
+    valid_pool = Pool(x_valid, y_valid, cat_features=categorical)
+
+    model = CatBoostClassifier(iterations=CATBOOST_ITERATIONS, **params)
+    model.fit(train_pool, eval_set=valid_pool, early_stopping_rounds=CATBOOST_EARLY_STOPPING)
+    return model
