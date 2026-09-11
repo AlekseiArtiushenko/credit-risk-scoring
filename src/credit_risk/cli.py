@@ -8,7 +8,7 @@ import time
 
 import numpy as np
 
-from .aggregates import DEPTH1_TABLES, attach_aggregates
+from .aggregates import DEPTH1_TABLES, DEPTH2_TABLES, attach_aggregates, attach_depth2
 from .config import REPORTS, SEED
 from .console import setup_console
 from .data import load_depth0
@@ -47,6 +47,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         metavar="TABLE",
         choices=list(DEPTH1_TABLES),
         help="свернуть и приклеить таблицы глубины один: " + ", ".join(DEPTH1_TABLES),
+    )
+    parser.add_argument(
+        "--depth2",
+        nargs="*",
+        default=[],
+        metavar="TABLE",
+        choices=list(DEPTH2_TABLES),
+        help="свернуть и приклеить таблицы глубины два: " + ", ".join(DEPTH2_TABLES),
     )
     parser.add_argument(
         "--compare-random",
@@ -93,6 +101,12 @@ def main(argv: list[str] | None = None) -> None:
         frame = attach_aggregates(frame, args.aggregates)
         print(f"колонок после свёрток: {frame.width}")
 
+    if args.depth2:
+        print()
+        print("свёртки таблиц глубины два:")
+        frame = attach_depth2(frame, args.depth2)
+        print(f"колонок после свёрток: {frame.width}")
+
     frame = build_features(frame)
     x, y, weeks = to_model_frame(frame)
     print(f"признаков после отбора: {x.shape[1]}   доля дефолтов: {y.mean():.5f}")
@@ -103,6 +117,7 @@ def main(argv: list[str] | None = None) -> None:
         "rows": int(len(x)),
         "features": int(x.shape[1]),
         "aggregates": args.aggregates,
+        "depth2": args.depth2,
     }
 
     if args.holdout_from is not None:
