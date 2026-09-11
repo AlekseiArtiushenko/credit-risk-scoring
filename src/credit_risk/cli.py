@@ -19,6 +19,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--folds", type=int, default=4, help="число разбиений по времени")
     parser.add_argument("--tag", type=str, default="depth0", help="имя прогона для отчёта")
     parser.add_argument(
+        "--window",
+        choices=("expanding", "sliding"),
+        default="expanding",
+        help="растущее окно обучения или скользящее постоянной ширины",
+    )
+    parser.add_argument(
         "--compare-random",
         action="store_true",
         help="дополнительно прогнать случайную нарезку, чтобы увидеть завышение",
@@ -30,8 +36,14 @@ def _print_result(title: str, result) -> None:
     print(f"\n--- {title} ---")
     print(f"AUC по фолдам: {[round(s, 5) for s in result.fold_scores]}")
     print(f"среднее {result.mean_auc:.5f}   разброс {result.std_auc:.5f}")
-    if result.stability is not None:
-        print(f"устойчивость (метрика соревнования): {result.stability:.5f}")
+    if result.components is not None:
+        k = result.components
+        print(f"устойчивость (метрика соревнования): {k['stability']:.5f}")
+        print(f"  средний джини по неделям  {k['mean_gini']:+.5f}")
+        print(f"  наклон за неделю          {k['slope']:+.5f}"
+              f"  -> штраф {k['slope_penalty']:+.5f}")
+        print(f"  разброс вокруг прямой     {k['residual_std']:+.5f}"
+              f"  -> штраф {k['residual_penalty']:+.5f}")
     for name, value in result.panel.items():
         print(f"  {name:26} {value:.5f}")
 
@@ -54,19 +66,21 @@ def main(argv: list[str] | None = None) -> None:
     print(f"признаков после отбора: {x.shape[1]}   доля дефолтов: {y.mean():.5f}")
     print(f"недель: {len(set(weeks))} (с {weeks.min()} по {weeks.max()})")
 
-    time_result = run_time_cv(x, y, weeks, n_splits=args.folds)
-    _print_result("разбиение по времени (честное)", time_result)
+    time_result = run_time_cv(x, y, weeks, n_splits=args.folds, window=args.window)
+    _print_result(f"разбиение по времени, окно {args.window}", time_result)
 
     report = {
         "tag": args.tag,
         "rows": int(len(x)),
         "features": int(x.shape[1]),
         "folds": args.folds,
+        "window": args.window,
         "time_cv": {
             "fold_auc": time_result.fold_scores,
             "mean_auc": time_result.mean_auc,
             "std_auc": time_result.std_auc,
             "stability": time_result.stability,
+            "components": time_result.components,
             **time_result.panel,
         },
     }

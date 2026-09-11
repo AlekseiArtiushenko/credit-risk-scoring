@@ -104,3 +104,40 @@ def gini_stability(
         + falling_rate_weight * min(0.0, slope)
         - residual_std_weight * np.std(residuals)
     )
+
+
+def stability_components(
+    week: np.ndarray,
+    y_true: np.ndarray,
+    y_score: np.ndarray,
+    falling_rate_weight: float = 88.0,
+    residual_std_weight: float = 0.5,
+) -> dict:
+    """Разложить метрику устойчивости на составляющие.
+
+    Итоговое число ничего не объясняет само по себе. Просело ли качество
+    равномерно, рухнуло ли в конце, или просто шумит от недели к неделе, видно
+    только по наклону, разбросу и самому ряду недельных значений.
+    """
+    weeks, ginis = gini_per_week(week, y_true, y_score)
+    if len(ginis) < 2:
+        raise ValueError("нужно минимум две недели с обеими метками")
+
+    x = np.arange(len(ginis))
+    slope, intercept = np.polyfit(x, ginis, 1)
+    residuals = ginis - (slope * x + intercept)
+    residual_std = float(np.std(residuals))
+    mean_gini = float(np.mean(ginis))
+
+    return {
+        "mean_gini": mean_gini,
+        "slope": float(slope),
+        "residual_std": residual_std,
+        "slope_penalty": falling_rate_weight * min(0.0, float(slope)),
+        "residual_penalty": -residual_std_weight * residual_std,
+        "stability": mean_gini
+        + falling_rate_weight * min(0.0, float(slope))
+        - residual_std_weight * residual_std,
+        "weeks": weeks.tolist(),
+        "weekly_gini": [round(g, 5) for g in ginis.tolist()],
+    }

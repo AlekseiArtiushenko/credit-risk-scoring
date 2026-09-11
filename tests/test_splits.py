@@ -4,7 +4,7 @@ import numpy as np
 import polars as pl
 
 from credit_risk.features import drop_useless_columns
-from credit_risk.validation import expanding_window_splits
+from credit_risk.validation import expanding_window_splits, time_splits
 
 
 def test_training_never_sees_the_future():
@@ -56,3 +56,25 @@ def test_useless_columns_are_dropped():
     assert "constant_770L" not in kept, "постоянная колонка бесполезна"
     assert "mostly_null_123A" not in kept, "почти пустая колонка бесполезна"
     assert {"case_id", "target", "WEEK_NUM"} <= set(kept), "служебные колонки остаются"
+
+
+def test_sliding_window_keeps_training_size_constant():
+    weeks = np.repeat(np.arange(40), 10)
+
+    sizes = [len(train_idx) for train_idx, _ in time_splits(weeks, 4, window="sliding")]
+    assert len(set(sizes)) == 1, "ширина окна обучения должна быть постоянной"
+
+
+def test_sliding_window_moves_forward():
+    weeks = np.repeat(np.arange(40), 10)
+
+    starts = [weeks[train_idx].min() for train_idx, _ in time_splits(weeks, 4, window="sliding")]
+    assert starts == sorted(starts)
+    assert starts[0] < starts[-1], "окно должно ехать вперёд, а не стоять"
+
+
+def test_sliding_window_never_sees_the_future():
+    weeks = np.repeat(np.arange(40), 10)
+
+    for train_idx, valid_idx in time_splits(weeks, 4, window="sliding"):
+        assert weeks[train_idx].max() < weeks[valid_idx].min()

@@ -16,7 +16,7 @@ import pandas as pd
 from sklearn.model_selection import StratifiedKFold
 
 from .config import CVConfig
-from .metrics import gini_stability, score_panel
+from .metrics import gini_stability, score_panel, stability_components
 from .model import train_fold
 
 
@@ -30,6 +30,7 @@ class CVResult:
     feature_importance: pd.DataFrame
     panel: dict[str, float] = field(default_factory=dict)
     stability: float | None = None
+    components: dict | None = None  # из чего сложилась устойчивость
 
     @property
     def mean_auc(self) -> float:
@@ -41,15 +42,25 @@ class CVResult:
         return float(np.std(self.fold_scores))
 
 
-def expanding_window_splits(
-    weeks: np.ndarray, n_splits: int = 4, min_train_share: float = 0.5
+def time_splits(
+    weeks: np.ndarray,
+    n_splits: int = 4,
+    min_train_share: float = 0.5,
+    window: str = "expanding",
 ) -> Iterator[tuple[np.ndarray, np.ndarray]]:
-    """Разбиение по времени с расширяющимся окном обучения.
+    """Разбиение по времени. Ни одна строка из будущего не попадает в обучение.
 
-    Первый фолд учится на первой половине недель и проверяется на следующем
-    куске. Дальше обучающая часть растёт, проверочная едет вперёд. Ни одна
-    строка из будущего никогда не попадает в обучение.
+    Режим ``expanding``: обучающая часть растёт от фолда к фолду. Ближе к жизни,
+    где данных со временем становится больше, но плохо годится для измерения
+    деградации: поздние фолды выигрывают за счёт объёма, а не за счёт времени.
+
+    Режим ``sliding``: окно обучения одной и той же ширины едет вперёд вместе с
+    проверочным. Объём обучения постоянен, поэтому разница между фолдами это
+    только сдвиг во времени. Именно так проверяют дрейф.
     """
+    if window not in ("expanding", "sliding"):
+        raise ValueError(f"неизвестный режим окна: {window!r}")
+
     unique_weeks = np.unique(weeks)
     start = int(len(unique_weeks) * min_train_share)
     edges = np.linspace(start, len(unique_weeks), n_splits + 1).astype(int)
@@ -59,12 +70,19 @@ def expanding_window_splits(
         if high <= low:
             continue
 
-        train_mask = np.isin(weeks, unique_weeks[:low])
+        train_weeks = unique_weeks[:low] if window == "expanding" else unique_weeks[low - start : low]
+
+        train_mask = np.isin(weeks, train_weeks)
         valid_mask = np.isin(weeks, unique_weeks[low:high])
-        if valid_mask.sum() == 0:
+        if valid_mask.sum() == 0 or train_mask.sum() == 0:
             continue
 
         yield np.flatnonzero(train_mask), np.flatnonzero(valid_mask)
+
+
+# Прежнее имя, чтобы не ломать существующие вызовы.
+def expanding_window_splits(weeks, n_splits: int = 4, min_train_share: float = 0.5):
+    return time_splits(weeks, n_splits, min_train_share, window="expanding")
 
 
 def _run(
@@ -114,9 +132,10 @@ def _run(
     )
 
     if weeks is not None:
-        result.stability = gini_stability(
+        result.components = stability_components(
             weeks[evaluated], y[evaluated].to_numpy(), oof[evaluated]
         )
+        result.stability = result.components["stability"]
 
     return result
 
@@ -127,9 +146,10 @@ def run_time_cv(
     weeks: np.ndarray,
     n_splits: int = 4,
     min_train_share: float = 0.5,
+    window: str = "expanding",
 ) -> CVResult:
     """Честная проверка: учимся на прошлом, проверяемся на будущем."""
-    splits = list(expanding_window_splits(weeks, n_splits, min_train_share))
+    splits = list(time_splits(weeks, n_splits, min_train_share, window))
     if not splits:
         raise ValueError("не удалось построить ни одного разбиения по времени")
     return _run(x, y, weeks, splits)
