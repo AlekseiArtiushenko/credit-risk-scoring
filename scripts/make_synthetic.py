@@ -59,7 +59,7 @@ def make_frame(n_rows: int, seed: int = SEED) -> pd.DataFrame:
 
     # A genuine signal the model should be able to find, plus noise.
     logit = (
-        -2.4
+        -3.6  # tuned so the fixture lands near the real 8 percent base rate
         - 2.0 * (ext_source_2 - 0.5)
         - 1.8 * (ext_source_3 - 0.5)
         + 0.45 * np.log1p(df["AMT_CREDIT"] / df["AMT_INCOME_TOTAL"])

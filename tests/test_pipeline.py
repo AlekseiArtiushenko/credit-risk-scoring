@@ -19,7 +19,7 @@ from make_synthetic import make_frame  # noqa: E402
 
 @pytest.fixture(scope="module")
 def frame() -> pd.DataFrame:
-    return make_frame(3000, seed=1)
+    return make_frame(6000, seed=1)
 
 
 def test_sentinel_is_removed(frame):
