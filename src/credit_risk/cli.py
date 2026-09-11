@@ -8,6 +8,7 @@ import time
 
 import numpy as np
 
+from .aggregates import DEPTH1_TABLES, attach_aggregates
 from .config import REPORTS, SEED
 from .console import setup_console
 from .data import load_depth0
@@ -38,6 +39,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=int,
         default=2000,
         help="для справки: порог по числу заявок, ниже которого неделя считается пустой",
+    )
+    parser.add_argument(
+        "--aggregates",
+        nargs="*",
+        default=[],
+        metavar="TABLE",
+        choices=list(DEPTH1_TABLES),
+        help="свернуть и приклеить таблицы глубины один: " + ", ".join(DEPTH1_TABLES),
     )
     parser.add_argument(
         "--compare-random",
@@ -78,6 +87,12 @@ def main(argv: list[str] | None = None) -> None:
         frame = frame.sample(n=min(args.sample, frame.height), seed=SEED)
         print(f"выборка: {frame.height:,} заявок")
 
+    if args.aggregates:
+        print()
+        print("свёртки таблиц глубины один:")
+        frame = attach_aggregates(frame, args.aggregates)
+        print(f"колонок после свёрток: {frame.width}")
+
     frame = build_features(frame)
     x, y, weeks = to_model_frame(frame)
     print(f"признаков после отбора: {x.shape[1]}   доля дефолтов: {y.mean():.5f}")
@@ -87,6 +102,7 @@ def main(argv: list[str] | None = None) -> None:
         "tag": args.tag,
         "rows": int(len(x)),
         "features": int(x.shape[1]),
+        "aggregates": args.aggregates,
     }
 
     if args.holdout_from is not None:
