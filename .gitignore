@@ -1,0 +1,22 @@
+# data is never committed
+data/raw/*
+data/interim/*
+!data/raw/.gitkeep
+!data/interim/.gitkeep
+
+# reports: keep the directory, ignore generated artefacts
+reports/*
+!reports/.gitkeep
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ipynb_checkpoints/
+*.egg-info/
+
+# secrets
+.env
+kaggle.json
