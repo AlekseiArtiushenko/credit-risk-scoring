@@ -90,6 +90,7 @@ def _run(
     y: pd.Series,
     weeks: np.ndarray | None,
     splits: list[tuple[np.ndarray, np.ndarray]],
+    params: dict | None = None,
 ) -> CVResult:
     """Общий цикл: обучить модель на каждом разбиении и собрать предсказания."""
     oof = np.full(len(x), np.nan)
@@ -98,7 +99,7 @@ def _run(
 
     for fold, (train_idx, valid_idx) in enumerate(splits, start=1):
         booster = train_fold(
-            x.iloc[train_idx], y.iloc[train_idx], x.iloc[valid_idx], y.iloc[valid_idx]
+            x.iloc[train_idx], y.iloc[train_idx], x.iloc[valid_idx], y.iloc[valid_idx], params
         )
 
         oof[valid_idx] = booster.predict(x.iloc[valid_idx])
@@ -147,12 +148,13 @@ def run_time_cv(
     n_splits: int = 4,
     min_train_share: float = 0.5,
     window: str = "expanding",
+    params: dict | None = None,
 ) -> CVResult:
     """Честная проверка: учимся на прошлом, проверяемся на будущем."""
     splits = list(time_splits(weeks, n_splits, min_train_share, window))
     if not splits:
         raise ValueError("не удалось построить ни одного разбиения по времени")
-    return _run(x, y, weeks, splits)
+    return _run(x, y, weeks, splits, params)
 
 
 def run_random_cv(
